@@ -1,42 +1,49 @@
 #include <cstdlib>
 #include <iostream>
-#include <ranges>
-#include <unordered_map>
+#include <iterator>
+#include <vector>
 #include <algorithm>
+#include <numeric>
+#include <ranges>
 
+constexpr int module_fuel_requirement(int mass) {
+	auto fuel = mass / 3 - 2;
+	return std::max(0, fuel);
+}
+
+constexpr int full_module_fuel_requirement(int mass) {
+	auto total_fuel = module_fuel_requirement(mass);
+	auto partial_fuel = total_fuel;
+	do {
+		partial_fuel = module_fuel_requirement(partial_fuel);
+//		std::cout << partial_fuel << '\n';
+		total_fuel += partial_fuel;
+	} while (partial_fuel);
+	return total_fuel;
+}
 
 int main(int argc, char **argv) {
-	std::unordered_map<int, unsigned> numbers;
-	for (auto i : std::ranges::subrange{std::istream_iterator<int>{std::cin}, std::istream_iterator<int>{}}) {
-		++numbers[i];
-	}
+	std::ranges::subrange module_masses{std::istream_iterator<int>{std::cin}, std::istream_iterator<int>{}};
+	auto module_fuel_requirements = std::views::transform(module_masses, full_module_fuel_requirement);
 
-	if (numbers.size() < 3) {
-		unsigned size = 0;
-		for (auto [k, v] : numbers) {
-			size += v;
-		}
-		if (size < 3) return EXIT_FAILURE;
-	}
-
-	for (auto [i1, count1] : numbers) {
-		for (auto [i2, count2] : numbers) {
-			if (i1 == i2 && count1 < 2) continue;
-			auto i3 = 2020 - i1 - i2;
-			auto it3 = numbers.find(i3);
-			if (it3 != numbers.end()) {
-				auto count3 = it3->second;
-				if (
-					(i1 != i2 && i3 != i1 && i3 != i2) ||
-					(i1 != i2 && (i3 == i1 || i3 == i2) && count3 >= 2) ||
-					(i1 == i2 && i3 == i1 && count3 >= 3)
-				) {
-					std::cout << i1 << " + " << i2 << " + " << i3 << " = " << 2020 << "\n";
-					std::cout << i1 << " * " << i2 << " * " << i3 << " = " << (i1 * i2 * i3) << "\n";
-					return EXIT_SUCCESS;
-				}
-			}
+//	std::cout << std::reduce(module_fuel_requirements.begin(), module_fuel_requirements.end()) << '\n';
+	int total_sum = 0;
+	for (auto fuel : module_fuel_requirements) total_sum += fuel;
+	std::cout << total_sum << std::endl;
+/*
+	auto lower = numbers.begin();
+	auto higher = numbers.end()-1;
+	while (lower < higher) {
+		auto sum = *lower + *higher;
+		if (sum == 2020) {
+			std::cout << *lower << " + " << *higher << " = " << sum << '\n';
+			std::cout << *lower << " * " << *higher << " = " << (*lower * *higher) << '\n';
+			return EXIT_SUCCESS;
+		} else if (sum > 2020) {
+			--higher;
+		} else {
+			++lower;
 		}
 	}
-	return EXIT_FAILURE;
+	return EXIT_FAILURE;*/
 }

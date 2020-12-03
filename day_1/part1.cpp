@@ -2,16 +2,24 @@
 #include <iostream>
 #include <iterator>
 #include <vector>
-#include <algorithm>
+//#include <algorithm>
+#include <numeric>
+#include <ranges>
+
+constexpr int module_fuel_requirement(int mass) {
+	return mass / 3 - 2;
+}
 
 
 int main(int argc, char **argv) {
-	std::vector<int> numbers{std::istream_iterator<int>{std::cin}, std::istream_iterator<int>{}};
+	std::ranges::subrange module_masses{std::istream_iterator<int>{std::cin}, std::istream_iterator<int>{}};
+	auto module_fuel_requirements = std::views::transform(module_masses, module_fuel_requirement);
 
-	if (numbers.size() < 2) return EXIT_FAILURE;
-
-	std::sort(numbers.begin(), numbers.end());
-
+//	std::cout << std::reduce(module_fuel_requirements.begin(), module_fuel_requirements.end()) << '\n';
+	int sum = 0;
+	for (auto fuel : module_fuel_requirements) sum += fuel;
+	std::cout << sum << std::endl;
+/*
 	auto lower = numbers.begin();
 	auto higher = numbers.end()-1;
 	while (lower < higher) {
@@ -26,5 +34,5 @@ int main(int argc, char **argv) {
 			++lower;
 		}
 	}
-	return EXIT_FAILURE;
+	return EXIT_FAILURE;*/
 }
