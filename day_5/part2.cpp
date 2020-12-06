@@ -40,10 +40,14 @@ struct instruction {
 
 
 int main(int argc, char **argv) {
+	if (argc < 2) {
+		std::cout << "Usage: " << argv[0] << " <file> <index=value> ...\n";
+		return EXIT_FAILURE;
+	}
 	std::vector<int> numbers;
 	int num;
 	{
-		std::fstream file{"input"};
+		std::fstream file{argv[1]};
 		while (file >> num) {
 			numbers.push_back(num);
 			file >> ',';
@@ -51,7 +55,7 @@ int main(int argc, char **argv) {
 	}
 
 	if (numbers.size() < 1) return EXIT_FAILURE;
-	for (auto arg = 1; arg < argc; ++arg) {
+	for (auto arg = 2; arg < argc; ++arg) {
 		unsigned index, value;
 		if (!(std::istringstream{argv[arg]} >> index >> '=' >> value)) return EXIT_FAILURE;
 		numbers[index] = value;
@@ -65,7 +69,7 @@ int main(int argc, char **argv) {
 
 
 	for (unsigned index = 0; index < numbers.size()-3; ) {
-		std::cerr << numbers << std::endl;
+//		std::cerr << numbers << std::endl;
 		instruction inst{numbers[index]};
 		if (inst.opcode == 1) {
 			get_parameter(numbers[index+3], inst.modes[2])
@@ -108,9 +112,12 @@ int main(int argc, char **argv) {
 		} else if (inst.opcode == 99) {
 			index += 1;
 			break;
+		} else {
+			std::cerr << "Invalid opcode: " << inst.opcode << " at index " << index << '\n';
+			break;
 		}
 	}
-	std::cerr << numbers << std::endl;
+	std::cerr << '\n' << numbers << std::endl;
 
-//	std::cout << numbers[0] << '\n';
+	std::cout << "memory[0] = " << numbers[0] << '\n';
 }
