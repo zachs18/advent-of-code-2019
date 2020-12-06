@@ -25,16 +25,34 @@ indexOf x (y:ys)
 	| (x == y) = Just 0
 	| otherwise = fmap (+1) (indexOf x ys)
 
+pixelColor :: Int -> [[Char]] -> Char
+pixelColor _ [] = 'X'
+pixelColor i (layer:layers)
+	| (c == '2') = pixelColor i layers
+	| otherwise = c
+	where c = layer !! i
+
+prettyChar :: Char -> [Char]
+prettyChar '0' = " "
+prettyChar '1' = "\x1b[107m \x1b[0m"
+prettyChar _ = "\x1b[41mX\x1b[0m"
+
+prettyImage :: [Char] -> [Char]
+prettyImage [] = []
+prettyImage (c:cs) = (prettyChar c) ++ prettyImage cs
+
 main = do
 	input <- getContents
 	let image = head $ lines input
 	let layers = chunks (25 * 6) image
-	print $ length layers
 	let zcount = fmap (count '0') layers
-	print zcount
 	let minIndex = (\(Just x) -> x) (indexOf (minimum zcount) zcount)
-	print minIndex
-	let layer = layers !! minIndex
-	print $ layer
-	print $ (count '1' layer) * (count '2' layer)
 
+	putStr "Part 1: "
+	print minIndex
+
+	let layer = layers !! minIndex
+	let actualImage = fmap (\i -> pixelColor i layers) [0, 1 .. (25*6-1)]
+
+	putStrLn "Part 2: "
+	mapM_ putStrLn $ fmap prettyImage $ chunks 25 actualImage
