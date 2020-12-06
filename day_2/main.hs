@@ -1,5 +1,6 @@
 import System.Environment
 import System.IO
+import Data.List
 
 type Memory = [Int]
 type Cell = Int
@@ -61,12 +62,7 @@ step memory index
 		mode3 = div (mod instruction 100000) 10000
 
 
--- This won't work (yet) because i don't completely get IO yet.
 execute :: Memory -> Int -> IO Memory
---execute memory index
---	| index == nextindex = return memory
---	| otherwise = execute nextmemory nextindex
---	where (nextmemory, nextindex) = step memory index
 execute memory index = do
 	(nextmemory, nextindex) <- step memory index
 	if index == nextindex
@@ -97,6 +93,30 @@ doAll :: [IO ()] -> IO ()
 doAll [] = return ()
 doAll (x:xs) = do x; doAll xs
 
+isValid :: Memory -> Cell -> IO Bool
+isValid memory requestedResult = do
+	memory' <- execute memory 0
+	return $ memory' !! 0 == requestedResult
+
+combine :: IO a -> b -> c -> IO (a, b, c)
+combine ia b c = do
+	a <- ia
+	return (a, b, c)
+
+findValid :: Memory -> [Int] -> [Cell] -> Cell -> IO (Maybe [(Int, Cell)])
+--findValid memory changeLocations values requestedResult
+findValid memory [] _ requestedResult = do
+	valid <- isValid memory requestedResult
+	case valid of
+		True -> return $ Just []
+		False -> return $ Nothing
+findValid memory (loc:locs) vals requestedResult = do
+	rest <- sequence $ fmap (\value -> combine (findValid (applyChange memory (loc, value)) locs vals requestedResult) loc value) vals
+	let valids = filter (\(valid,_,_) -> (case valid of Nothing -> False; Just _ -> True)) rest
+	case valids of
+		((Just changes, location, value):_) -> return $ Just ((location,value) : changes)
+		[] -> return $ Nothing
+
 main = do
 	allArgs <- getArgs
 	let memoryFilename = head allArgs
@@ -104,15 +124,21 @@ main = do
 
 	memoryFile <- openFile memoryFilename ReadMode
 	rawInput <- hGetContents memoryFile
-	let originalMemory = map (read :: (String -> Int)) (splitBy (==',') (filter (/= '\n') rawInput))
-	print originalMemory
+	let memory = map (read :: (String -> Int)) (splitBy (==',') (filter (/= '\n') rawInput))
+	print memory
 	putStrLn ""
 
-	if (length args > 1) && (head args == "find")
-		then do
-			let requestedResult = (read $ head $ tail $ args) :: Int
-			let args' = tail $ tail args
-			let changeLocations = (map read args') :: [Int]
+	let (changesStrs, findStrs) = break (== "find") args
+	let changes = map parseMemoryChange changesStrs
+	let memory' = applyChanges memory changes
+
+	case findStrs of
+		[] -> do
+			memory'' <- execute memory' 0
+			print memory''
+		"find":requestedResultStr:changeLocationsStrs -> do
+			let requestedResult = (read requestedResultStr) :: Int
+			let changeLocations = (map read changeLocationsStrs) :: [Int]
 			putStr "Finding values at indices "
 			let putInt = (\d -> putStr $ (show d) ++ ", ")
 			doAll $ map putInt changeLocations
@@ -120,13 +146,8 @@ main = do
 			putStr "Such that memory' !! 0 == "
 			putInt requestedResult
 			putChar '\n'
-		else do
-			let changes = map parseMemoryChange args
-			let memory = applyChanges originalMemory changes
+			putChar '\n'
 
-			let input = map (read :: (String -> Int)) args
-
-			-- print $ execute memory input [] 0
-			putStrLn ""
-			memory' <- execute memory 0
-			print memory'
+			let values = [0..99]
+			valid <- findValid memory changeLocations values requestedResult
+			print valid
