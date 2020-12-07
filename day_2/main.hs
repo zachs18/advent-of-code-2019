@@ -84,6 +84,13 @@ execute memory index io = do
 		Execute -> execute nextmemory nextindex nextio
 		_ -> return $ error "Waiting on IO in execute"
 
+stepUntilWait :: Monad m => Memory -> Int -> IOHandler m -> m (Memory, Int, IOHandler m, ProgramState)
+stepUntilWait memory index io = do
+	all@(nextmemory, nextindex, nextio, nextstate) <- step memory index io
+	case nextstate of
+		Execute -> stepUntilWait nextmemory nextindex nextio
+		_ -> return all
+
 
 -- https://stackoverflow.com/a/4981265/5142683
 splitBy :: (a -> Bool) -> [a] -> [[a]]
@@ -142,7 +149,7 @@ myPartition f (x:xs) =
 		Nothing -> (bs, x:as)
 	where (bs, as) = myPartition f xs
 
-getNextInput :: State.StateT ([Cell], [Cell]) IO (Maybe Cell)
+getNextInput :: Monad m => State.StateT ([Cell], [Cell]) m (Maybe Cell)
 getNextInput = do
 	(xs, ys) <- State.get
 	case xs of
@@ -151,7 +158,7 @@ getNextInput = do
 			State.put (xs,ys)
 			return $ Just x
 	
-putNextOutput :: Cell -> State.StateT ([Cell], [Cell]) IO (Maybe ())
+putNextOutput :: Monad m => Cell -> State.StateT ([Cell], [Cell]) m (Maybe ())
 putNextOutput y = do
 	(xs, ys) <- State.get
 	State.put (xs,ys ++ [y])
@@ -162,7 +169,7 @@ range 0 = []
 range x = (range (x-1)) ++ [x-1]
 
 -- returns the final output
-chainExecutions :: Memory -> [Cell] -> Cell -> IO Cell
+chainExecutions :: Monad m => Memory -> [Cell] -> Cell -> m Cell
 chainExecutions memory [] start_value = return start_value
 chainExecutions memory (c:cs) start_value = do
 	let io = (getNextInput, putNextOutput)
@@ -171,7 +178,7 @@ chainExecutions memory (c:cs) start_value = do
 	chainExecutions memory cs $ head $ snd state'
 
 
-getLoopedInput :: Int -> State.StateT [[Cell]] IO (Maybe Cell)
+getLoopedInput :: Monad m => Int -> State.StateT [[Cell]] m (Maybe Cell)
 getLoopedInput index = do
 	xss <- State.get
 	let xs = get index xss
@@ -181,12 +188,30 @@ getLoopedInput index = do
 			State.put $ set index xs xss
 			return $ Just x
 	
-putLoopedOutput :: Int -> Cell -> State.StateT [[Cell]] IO (Maybe ())
+putLoopedOutput :: Monad m => Int -> Cell -> State.StateT [[Cell]] m (Maybe ())
 putLoopedOutput index y = do
 	xss <- State.get
 	let xs = get index xss
 	State.put $ set index (xs ++ [y]) xss
 	return $ Just ()
+
+-- returns the final output
+loopExecutions :: Monad m => Memory -> [Cell] -> Cell -> m Cell
+loopExecutions memory config start_value = do
+	let io = \i -> (getLoopedInput i, putLoopedOutput ((i+1) `mod` (length config)))
+	let state = (s ++ [0]):ss
+		where (s:ss) = map (\i -> [i]) config
+	(_, state') <- State.runStateT (loopExecutionsHelper (map (\i -> (memory, 0, io i)) $ range $ length config)) state
+	return $ head $ foldl (++) [] state'
+
+loopExecutionsHelper :: Monad m => [(Memory, Int, IOHandler m)] -> m ()
+loopExecutionsHelper [] = return ()
+loopExecutionsHelper (p@(memory, index, io):ps) = do
+	p'@(memory', index', io', programstate') <- stepUntilWait memory index io
+	case programstate' of
+		Halt -> loopExecutionsHelper ps 
+		_ -> loopExecutionsHelper (ps ++ [(memory', index', io')]) 
+	
 
 main = do
 	allArgs <- getArgs
@@ -205,10 +230,10 @@ main = do
 	let defaultio = (fmap (readMaybe :: String -> Maybe Int) getLine, (\d -> do dd <- print d; return $ Just dd)) :: IOHandler IO
 
 	case args' of
-		[] -> do
+		[] -> do -- day 2 part 1, CLI "filename 1=12 2=2"; day 5 CLI "filename"
 			memory' <- execute memory 0 defaultio
 			print memory'
-		"find":requestedResultStr:changeLocationsStrs -> do
+		"find":requestedResultStr:changeLocationsStrs -> do -- day 2 part 2 CLI "filename find 19690720 1 2"
 			let requestedResult = (read requestedResultStr) :: Int
 			let changeLocations = (map read changeLocationsStrs) :: [Int]
 			putStr "Finding values at indices "
@@ -223,10 +248,19 @@ main = do
 			let values = [0..99]
 			valid <- findValid memory changeLocations values requestedResult defaultio
 			print valid
-		"sequence":countStr:[] -> do
+		"sequence":countStr:[] -> do -- day 7 part 1, input CLI "filename sequence 5"
 			let count = read countStr :: Int
 			let configurations = permutations $ range count
 			let try_configuration = \config -> chainExecutions memory config 0
+			
+			all_outputs <- sequence $ fmap (\config -> combine (try_configuration config) config ()) configurations
+			
+			let (best_output,best_config,_) = foldl (\b@(b1,_,_) -> \a@(a1,_,_) -> if a1 > b1 then a else b) (minBound :: Int, [], ()) all_outputs
+			print best_output
+		"loop":countStr:[] -> do -- day 7 part 2, input CLI "filename loop 5"
+			let count = read countStr :: Int
+			let configurations = permutations $ map (+count) $ range count
+			let try_configuration = \config -> loopExecutions memory config 0
 			
 			all_outputs <- sequence $ fmap (\config -> combine (try_configuration config) config ()) configurations
 			
