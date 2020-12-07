@@ -6,10 +6,12 @@ import Data.Maybe (isJust)
 import Data.IORef
 import qualified Control.Monad.State as State
 
+data ProgramState = Execute | Halt | IWait | OWait
+	deriving (Show, Eq)
 type Memory = [Int]
 type Cell = Int
 type ParameterMode = Int
-type IOHandler monad = (monad Int, Int -> monad ())
+type IOHandler monad = (monad (Maybe Int), Int -> monad (Maybe ()))
 --data IOHandler = IOHandler {
 --	ioin :: IO (Int, IOHandler),
 --	ioout :: Int -> IO (IOHandler)
@@ -41,25 +43,29 @@ b2i :: Bool -> Int
 b2i True = 1
 b2i False = 0
 
-step :: Monad m => Memory -> Int -> IOHandler m -> m (Memory, Int, IOHandler m)
+step :: Monad m => Memory -> Int -> IOHandler m -> m (Memory, Int, IOHandler m, ProgramState)
 step memory index io@(ioin, ioout)
-	| opcode == 99 = return (memory, i, io)
-	| opcode == 1 = return (setParameter mode3 (i+3) ((getParameter mode1 (i+1) memory) + (getParameter mode2 (i+2) memory)) memory, (i+4), io)
-	| opcode == 2 = return (setParameter mode3 (i+3) ((getParameter mode1 (i+1) memory) * (getParameter mode2 (i+2) memory)) memory, (i+4), io)
+	| opcode == 99 = return (memory, i, io, Halt)
+	| opcode == 1 = return (setParameter mode3 (i+3) ((getParameter mode1 (i+1) memory) + (getParameter mode2 (i+2) memory)) memory, (i+4), io, Execute)
+	| opcode == 2 = return (setParameter mode3 (i+3) ((getParameter mode1 (i+1) memory) * (getParameter mode2 (i+2) memory)) memory, (i+4), io, Execute)
 	| opcode == 3 = do
 		input <- ioin
-		return (setParameter mode1 (i+1) input memory, i + 2, io)
+		case input of
+			Just value -> return (setParameter mode1 (i+1) value memory, i + 2, io, Execute)
+			Nothing -> return (memory, i, io, IWait)
 	| opcode == 4 = do
-		ioout $ getParameter mode1 (i+1) memory
-		return (memory, i + 2, io)
+		output <- ioout $ getParameter mode1 (i+1) memory
+		case output of
+			Just _ -> return (memory, i + 2, io, Execute)
+			Nothing -> return (memory, i, io, OWait)
 	| opcode == 5 = return (if 0 /= getParameter mode1 (i+1) memory
-		then (memory, getParameter mode2 (i+2) memory, io)
-		else (memory, i + 3, io))
+		then (memory, getParameter mode2 (i+2) memory, io, Execute)
+		else (memory, i + 3, io, Execute))
 	| opcode == 6 = return (if 0 == getParameter mode1 (i+1) memory
-		then (memory, getParameter mode2 (i+2) memory, io)
-		else (memory, i + 3, io))
-	| opcode == 7 = return (setParameter mode3 (i+3) (b2i ((getParameter mode1 (i+1) memory) < (getParameter mode2 (i+2) memory))) memory, (i+4), io)
-	| opcode == 8 = return (setParameter mode3 (i+3) (b2i ((getParameter mode1 (i+1) memory) == (getParameter mode2 (i+2) memory))) memory, (i+4), io)
+		then (memory, getParameter mode2 (i+2) memory, io, Execute)
+		else (memory, i + 3, io, Execute))
+	| opcode == 7 = return (setParameter mode3 (i+3) (b2i ((getParameter mode1 (i+1) memory) < (getParameter mode2 (i+2) memory))) memory, (i+4), io, Execute)
+	| opcode == 8 = return (setParameter mode3 (i+3) (b2i ((getParameter mode1 (i+1) memory) == (getParameter mode2 (i+2) memory))) memory, (i+4), io, Execute)
 	| otherwise = return $ error $ "unrecognized opcode " ++ show opcode
 	where
 		i = index
@@ -72,10 +78,11 @@ step memory index io@(ioin, ioout)
 
 execute :: Monad m => Memory -> Int -> IOHandler m -> m Memory
 execute memory index io = do
-	(nextmemory, nextindex, nextio) <- step memory index io
-	if index == nextindex
-		then return memory
-		else execute nextmemory nextindex nextio
+	(nextmemory, nextindex, nextio, nextstate) <- step memory index io
+	case nextstate of
+		Halt -> return memory
+		Execute -> execute nextmemory nextindex nextio
+		_ -> return $ error "Waiting on IO in execute"
 
 
 -- https://stackoverflow.com/a/4981265/5142683
@@ -135,20 +142,20 @@ myPartition f (x:xs) =
 		Nothing -> (bs, x:as)
 	where (bs, as) = myPartition f xs
 
-getNextInput :: State.StateT ([Cell], [Cell]) IO Cell
+getNextInput :: State.StateT ([Cell], [Cell]) IO (Maybe Cell)
 getNextInput = do
 	(xs, ys) <- State.get
 	case xs of
-		[] -> return $ error "Too few input items"
+		[] -> return Nothing
 		(x:xs) -> do
 			State.put (xs,ys)
-			return x
+			return $ Just x
 	
-putNextOutput :: Cell -> State.StateT ([Cell], [Cell]) IO ()
+putNextOutput :: Cell -> State.StateT ([Cell], [Cell]) IO (Maybe ())
 putNextOutput y = do
 	(xs, ys) <- State.get
 	State.put (xs,ys ++ [y])
-	return ()
+	return $ Just ()
 	
 range :: Int -> [Int]
 range 0 = []
@@ -164,6 +171,23 @@ chainExecutions memory (c:cs) start_value = do
 	chainExecutions memory cs $ head $ snd state'
 
 
+getLoopedInput :: Int -> State.StateT [[Cell]] IO (Maybe Cell)
+getLoopedInput index = do
+	xss <- State.get
+	let xs = get index xss
+	case xs of
+		[] -> return Nothing
+		(x:xs) -> do
+			State.put $ set index xs xss
+			return $ Just x
+	
+putLoopedOutput :: Int -> Cell -> State.StateT [[Cell]] IO (Maybe ())
+putLoopedOutput index y = do
+	xss <- State.get
+	let xs = get index xss
+	State.put $ set index (xs ++ [y]) xss
+	return $ Just ()
+
 main = do
 	allArgs <- getArgs
 	let memoryFilename = head allArgs
@@ -178,7 +202,7 @@ main = do
 	let (changes, args') = myPartition parseMemoryChange args
 	let memory = applyChanges originalMemory changes
 
-	let defaultio = (fmap (read :: String -> Int) getLine, print) :: IOHandler IO
+	let defaultio = (fmap (readMaybe :: String -> Maybe Int) getLine, (\d -> do dd <- print d; return $ Just dd)) :: IOHandler IO
 
 	case args' of
 		[] -> do
