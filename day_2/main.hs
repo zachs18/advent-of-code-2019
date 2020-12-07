@@ -3,7 +3,6 @@ import System.IO
 import Data.List
 import Text.Read (readMaybe)
 import Data.Maybe (isJust)
-import Data.IORef
 import qualified Control.Monad.State as State
 
 data ProgramState = Execute | Halt | IWait | OWait
@@ -12,17 +11,6 @@ type Memory = [Int]
 type Cell = Int
 type ParameterMode = Int
 type IOHandler monad = (monad (Maybe Int), Int -> monad (Maybe ()))
---data IOHandler = IOHandler {
---	ioin :: IO (Int, IOHandler),
---	ioout :: Int -> IO (IOHandler)
---}
-
-
---splitAt :: Int -> [a] -> ([a], [a])
---splitAt _ [] = ([], [])
---splitAt 0 xs = ([], xs)
---splitAt i (x:xs) = (front ++ x, back)
---	where (front, back) = splitAt (i-1) xs
 
 get :: Int -> [a] -> a
 get index memory = memory !! index
@@ -221,8 +209,6 @@ main = do
 	memoryFile <- openFile memoryFilename ReadMode
 	rawInput <- hGetContents memoryFile
 	let originalMemory = map (read :: (String -> Int)) (splitBy (==',') (filter (/= '\n') rawInput))
-	print originalMemory
-	putStrLn ""
 
 	let (changes, args') = myPartition parseMemoryChange args
 	let memory = applyChanges originalMemory changes
@@ -232,7 +218,8 @@ main = do
 	case args' of
 		[] -> do -- day 2 part 1, CLI "filename 1=12 2=2"; day 5 CLI "filename"
 			memory' <- execute memory 0 defaultio
-			print memory'
+			putStr "memory' !! 0 = "
+			print $ head memory'
 		"find":requestedResultStr:changeLocationsStrs -> do -- day 2 part 2 CLI "filename find 19690720 1 2"
 			let requestedResult = (read requestedResultStr) :: Int
 			let changeLocations = (map read changeLocationsStrs) :: [Int]
@@ -246,8 +233,10 @@ main = do
 			putChar '\n'
 
 			let values = [0..99]
-			valid <- findValid memory changeLocations values requestedResult defaultio
-			print valid
+			result <- findValid memory changeLocations values requestedResult defaultio
+			case result of
+				Just valid -> print valid
+				Nothing -> print "No valid values found"
 		"sequence":countStr:[] -> do -- day 7 part 1, input CLI "filename sequence 5"
 			let count = read countStr :: Int
 			let configurations = permutations $ range count
@@ -267,4 +256,5 @@ main = do
 			let (best_output,best_config,_) = foldl (\b@(b1,_,_) -> \a@(a1,_,_) -> if a1 > b1 then a else b) (minBound :: Int, [], ()) all_outputs
 			print best_output
 		_ -> do
-			print $ permutations args'
+			putStr "Unrecognized arguments: "
+			print args'
